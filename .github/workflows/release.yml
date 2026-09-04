@@ -1,0 +1,90 @@
+name: Build and publish flashable ZIP
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag/version (e.g. v1.0)'
+        required: false
+        default: 'v1'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set version
+        id: vars
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build flashable ZIP
+        id: build
+        shell: bash
+        run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+
+          STAGING_DIR="$(mktemp -d)"
+          mkdir -p "$STAGING_DIR/module"
+
+          [ -f module.prop ] && cp -a module.prop "$STAGING_DIR/module/"
+          [ -d META-INF ] && cp -a META-INF "$STAGING_DIR/module/"
+          [ -f install.sh ] && cp -a install.sh "$STAGING_DIR/module/"
+          [ -d common ] && cp -a common "$STAGING_DIR/module/"
+          [ -d system ] && cp -a system "$STAGING_DIR/module/"
+
+          ZIPNAME="wifi5ghzdisabler-${VERSION}.zip"
+
+          (
+            cd "$STAGING_DIR/module"
+            zip -r "/tmp/$ZIPNAME" .
+          )
+
+          echo "zip_path=/tmp/$ZIPNAME" >> "$GITHUB_OUTPUT"
+          echo "zip_name=$ZIPNAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ steps.vars.outputs.version }}
+          release_name: "WiFi5GhzDisabler ${{ steps.vars.outputs.version }}"
+          body: |
+            Automated release with flashable Magisk module ZIP.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.build.outputs.zip_path }}
+          asset_name: ${{ steps.build.outputs.zip_name }}
+          asset_content_type: application/zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flashable-zip
+          path: ${{ steps.build.outputs.zip_path }}
