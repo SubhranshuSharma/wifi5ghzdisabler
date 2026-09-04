@@ -9,7 +9,7 @@
 #
 # 1. Place your files into system folder (delete the placeholder file)
 # 2. Fill in your module's info into module.prop
-# 3. Configure and implement callbacks in this file
+# # 3. Configure and implement callbacks in this file
 # 4. If you need boot scripts, add them into common/post-fs-data.sh or common/service.sh
 # 5. Add your additional or modified system properties into common/system.prop
 #
@@ -130,21 +130,47 @@ print_modname() {
 # Copy/extract your module files into $MODPATH in on_install.
 
 on_install() {
-  # The following is the default implementation: extract $ZIPFILE/system to $MODPATH
-  # Extend/change the logic to whatever you want
-  array=$(find /system /vendor -name WCNSS_qcom_cfg.ini)
-  for CFG in $array
-  do
-  [[ -f $CFG ]] && [[ ! -L $CFG ]] && {
-    SELECTPATH=$CFG
-    mkdir -p `dirname $MODPATH$CFG`
-    ui_print "- Migrating $CFG"
-    [[ -f /sbin/.magisk/mirror$SELECTPATH ]] && cp -af /sbin/.magisk/mirror$SELECTPATH $MODPATH$SELECTPATH || cp -af $SELECTPATH $MODPATH$SELECTPATH
-    ui_print "- Starting modifiy"
-    sed -i 's/BandCapability=0/BandCapability=1/g' $MODPATH$SELECTPATH
-  }
+  ui_print "- Searching for WCNSS_qcom_cfg.ini in common partitions..."
+
+  # Locations commonly used on modern devices (including Android 16 / LineageOS)
+  SEARCH_DIRS="/system /system_ext /vendor /odm /product /vendor/etc /odm/etc /product/etc /system/etc /"
+
+  found_count=0
+
+  for dir in $SEARCH_DIRS; do
+    # Use find only if the directory exists to avoid noisy errors
+    if [ -d "$dir" ]; then
+      for CFG in $(find "$dir" -type f -name WCNSS_qcom_cfg.ini 2>/dev/null); do
+        # Skip symlinks or other non-regular files
+        if [ -f "$CFG" ] && [ ! -L "$CFG" ]; then
+          found_count=$((found_count+1))
+          ui_print "- Migrating $CFG"
+          mkdir -p "$(dirname "$MODPATH$CFG")"
+          # If Magisk already mirrors the file, copy from the mirror to preserve current runtime changes
+          if [ -f "/sbin/.magisk/mirror$CFG" ]; then
+            cp -af "/sbin/.magisk/mirror$CFG" "$MODPATH$CFG"
+          else
+            cp -af "$CFG" "$MODPATH$CFG"
+          fi
+
+          ui_print "- Modifying BandCapability in $CFG"
+          # Try to replace full line first (robust to whitespace), fallback to exact match
+          sed -i 's/^BandCapability=.*/BandCapability=1/g' "$MODPATH$CFG" 2>/dev/null || \
+            sed -i 's/BandCapability=0/BandCapability=1/g' "$MODPATH$CFG" 2>/dev/null || true
+        fi
+      done
+    fi
   done
-  [[ -z $SELECTPATH ]] && abort "- WCNSS_qcom_cfg.ini not found" || { mkdir -p $MODPATH/system; mv -f $MODPATH/vendor $MODPATH/system/vendor;}
+
+  if [ "$found_count" -eq 0 ]; then
+    abort "- WCNSS_qcom_cfg.ini not found in known locations"
+  fi
+
+  # Ensure module uses system/vendor path for compatibility
+  mkdir -p "$MODPATH/system"
+  if [ -d "$MODPATH/vendor" ]; then
+    mv -f "$MODPATH/vendor" "$MODPATH/system/vendor"
+  fi
 }
 
 # Only some special files require specific permissions
