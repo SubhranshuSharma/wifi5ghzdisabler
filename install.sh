@@ -31,7 +31,7 @@ PROPFILE=false
 POSTFSDATA=false
 
 # Set to true if you need late_start service script
-LATESTARTSERVICE=false
+LATESTARTSERVICE=true
 
 ##########################################################################################
 # Replace list
@@ -186,6 +186,20 @@ set_permissions() {
   # set_perm  $MODPATH/system/bin/app_process32   0     2000    0755      u:object_r:zygote_exec:s0
   # set_perm  $MODPATH/system/bin/dex2oat         0     2000    0755      u:object_r:dex2oat_exec:s0
   # set_perm  $MODPATH/system/lib/libart.so       0     0       0644
+
+  # Set permissions for WiFi config overlay file with vendor SELinux context
+  if [ -f "$MODPATH/system/vendor/etc/wifi/WCNSS_qcom_cfg.ini" ]; then
+    # Try to read SELinux context from original vendor file; fallback to safe default
+    VENDOR_CFG="/vendor/etc/wifi/WCNSS_qcom_cfg.ini"
+    if [ -f "$VENDOR_CFG" ]; then
+      VENDOR_CONTEXT=$(stat -c "%C" "$VENDOR_CFG" 2>/dev/null) || VENDOR_CONTEXT="u:object_r:vendor_wifi_config_file:s0"
+    else
+      VENDOR_CONTEXT="u:object_r:vendor_wifi_config_file:s0"
+    fi
+    
+    set_perm "$MODPATH/system/vendor/etc/wifi/WCNSS_qcom_cfg.ini" 0 0 0644 "$VENDOR_CONTEXT"
+    ui_print "- Set permissions for WCNSS_qcom_cfg.ini (SELinux: $VENDOR_CONTEXT)"
+  fi
 }
 
 # You can add more functions to assist your custom script code
